@@ -18,6 +18,8 @@ from langchain_ollama import OllamaLLM, OllamaEmbeddings
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+# version_1: Now only support ReAct(test), Normal, and RAG these three kind of ways to talk.
+
 # 设置背景图像 #######################################
 def get_base64_of_bin_file(bin_file):
     with open(bin_file, 'rb') as f:
