@@ -20,12 +20,12 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 # version_1: Now only support ReAct(test), Normal, and RAG these three kind of ways to talk.
 
-# 设置背景图像 #######################################
+# Set backgroud Image #######################################
 def get_base64_of_bin_file(bin_file):
     with open(bin_file, 'rb') as f:
         data = f.read()
     return base64.b64encode(data).decode()
-img_path = "D:\桌面文件\学习\图片素材\结束图片.jpg"
+img_path = "<local path of your Image>"
 img_base64 = get_base64_of_bin_file(img_path)
 st.markdown(
     f"""  
@@ -42,26 +42,25 @@ st.markdown(
 )
 ####################################################
 
-st.title("First Terminal")
+st.title("<Your Agent's Name>")
 
-# 选择交流模式 (RAG 或 None_RAG)
+# Choose the mode (RAG 或 None_RAG)
 mode = st.sidebar.selectbox("Choose Your Mode",("Normal","RAG","ReAct(test)"))
 
-# 设置记忆清除按钮
+# Memory clear buttom
 bool_clear_memory = st.button("Start a new dialogue and del chat_history",type="primary")
 
-# 设置温度选择 (这里的 label 和 options 是必要的)
+# Temperature
 temperature_choosen = st.sidebar.select_slider(label="Temperature",options=[i/10 for i in range(0,11)])
 llama_model = OllamaLLM(model='llama3.1:8b',temperature=temperature_choosen)
 
-# 解析器设置
+# Parser Settings
 json_output_parser = JsonOutputParser()
 str_output_parser = StrOutputParser()
 
 @st.cache_resource(ttl='1h')
 def get_retriever(uploaded_file,embeddings):
-    '''这里的的embedding有两种选择，分别是llama3.1:8b,qwen2:7b
-    用str表述就可以了'''
+    '''Two kinds of chioces, llama3.1:8b, qwen2.5:7b'''
     docs = []
     for file in uploaded_file:
         temp_filepath = os.path.join(temp_dir,file.name)
@@ -80,11 +79,11 @@ def get_retriever(uploaded_file,embeddings):
     if embeddings == "llama3.1:8b":
         chosen_embedding = OllamaEmbeddings(model="llama3.1:8b")
     elif embeddings == "qwen2:7b":
-        chosen_embedding = OllamaEmbeddings(model="qwen2:7b")
+        chosen_embedding = OllamaEmbeddings(model="qwen2.5:7b")
     else:
         chosen_embedding = None
 
-    vectordb = Chroma.from_documents(documents=x, embedding=chosen_embedding)  # 这里不保存到本地
+    vectordb = Chroma.from_documents(documents=x, embedding=chosen_embedding)  # preserved in cache
     retriever = vectordb.as_retriever(search_type="mmr", search_kwargs={"k": 4, "fetch_k": 10})
     return retriever
 
@@ -92,7 +91,7 @@ def get_session_history(session_id: str):
     if session_id not in st.session_state["chat_history"]:
         st.session_state["chat_history"][session_id] = ChatMessageHistory()
     return st.session_state["chat_history"][session_id]
-# 记忆总结链(用于 ReAct)
+# Memory Summary Chain (Haven't been used in the following code)
 text_summary = """Here's the chat history between Human and AI assistant.
 {history_inputs}
 Please make a summary for it in the following format:\n
@@ -105,45 +104,45 @@ chain_summary = prompt_summary | llama_model
 
 # 提取函数
 def extract_functions_with_tool_decorator(code):
-    """提取代码中的函数定义，并添加 @tool 装饰器"""
+    """get the definition of function in Str, and add decorator @tool"""
     tree = ast.parse(code)
     functions = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):
-            # 添加 @tool 装饰器
+            # Add @tool
             tool_decorator = ast.Name(id='tool', ctx=ast.Load())
             node.decorator_list.insert(0, tool_decorator)
             func_code = ast.unparse(node)
             functions[node.name] = func_code
     return functions
 
-# 提取单步 ReAct动作
+# Parse the single action of ReAct
 def get_thoughts(x):
-    '''获取到每一步的thoughts'''
+    '''get thoughts'''
     y = re.search(r"Thought:(.*?)\n",x,re.DOTALL)
     return y.group(1).strip()
 
 def get_action(x):
-    '''获取到每一步的action'''
+    '''get action'''
     y = re.search(r"Action:(.*?)\n",x,re.DOTALL)
     return y.group(1).strip()
 
 def get_action_input(x):
-    '''获取到每一步action的参数'''
+    '''get action's Input'''
     y = re.search(r"Action Input:(.*?)}",x,re.DOTALL)
     yy = y.group(1).strip() + '}'
     yy = yy.replace("'", '"')
     return json_output_parser.parse(yy)
 
-# 执行 ReAct
+# execute ReAct
 def check_if_finished(res:str):
     if res.find(r"Action Input") == -1:
         return False
     else:
         return True
 def run_react_agent(user_input:str, prompt_react ,max_steps=8):
-    flag = True # true表示这里没有结束ReAct过程
-    one_chat_history = [] # 储存("human“,...)/("ai",...)的数据
+    flag = True
+    one_chat_history = [] # ("human“,...)/("ai",...)
     temp_ai_his = []
     one_chat_history.append(("user",user_input))
     chain_execute = {"inputs" : itemgetter("inputs"),
@@ -173,8 +172,8 @@ def run_react_agent(user_input:str, prompt_react ,max_steps=8):
     one_chat_history.append(("ai",'\n'.join(temp_ai_his)))
     return one_chat_history
 
-# 更新 Prompt_ReAct
-def reshape_prompt_human(x,response): # x是原来的 prompt
+# update Prompt_ReAct
+def reshape_prompt_human(x,response): # x is the prompt of last step
     the_thoughts = get_thoughts(response)
     the_action = get_action(response)
     the_action_input = get_action_input(response)
@@ -183,7 +182,7 @@ def reshape_prompt_human(x,response): # x是原来的 prompt
     f"Observation: The output of the action is {observation}"
     prompt_new = x + k
     return prompt_new
-# 重试函数
+# retry func
 def retry_on_failure(func, user_input ,prompt_react,max_attempts=5, delay=0.5):
     attempts = 0
     while attempts < max_attempts:
@@ -197,7 +196,7 @@ def retry_on_failure(func, user_input ,prompt_react,max_attempts=5, delay=0.5):
     print("超过最大重试次数，仍然失败。")
 
 
-# 记忆设置
+# Memory settings
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = {}
 if "chat_history_non_RAG" not in st.session_state:
@@ -207,15 +206,15 @@ if "chat_history_ReAct" not in st.session_state:
     st.session_state["chat_history_ReAct"].add_ai_message("Hello! How can I help you.")
 
 if mode == "RAG":
-    # 依据用户需求做记忆删除
+    # clear memory
     if bool_clear_memory:
         st.session_state["chat_history"] = {}
 
-    # 加载文件
+    # upload files
     upload_file = st.file_uploader(label="Your PDF Please", accept_multiple_files=True)
     temp_dir = st.sidebar.text_input(label="Your Temporary File Directory (For RAG)")
 
-    # 做一个 button 用于清理现有的 file browser 以重新产生 retriever
+    # create new retriever
     bool_change_retriever = st.button("Change Retriever", type="primary")
 
     if bool_change_retriever:
@@ -266,54 +265,53 @@ if mode == "RAG":
             for i in st.session_state["chat_history"][session_id].messages:
                 st.chat_message(i.type).write(i.content)
 
-        if user_input := st.chat_input():  # 这里设置为只有用户输入才做出反应
+        if user_input := st.chat_input():
             st.chat_message("user").write(user_input)
             res = conversation_RAG.invoke({"inputs":user_input},
                                           config={"configurable": {"session_id": session_id}})
             st.chat_message("ai").write(res)
 
 elif mode == "Normal":
-    # 依据用户需求做记忆删除
+    # clear memory
     if bool_clear_memory:
         st.session_state["chat_history_non_RAG"] = ConversationBufferMemory()
 
     conversation = ConversationChain(
         llm=llama_model,
-        memory=st.session_state["chat_history_non_RAG"]  # 将记忆导入
+        memory=st.session_state["chat_history_non_RAG"]  # load memory
     )
 
-    for i in conversation.memory.chat_memory.messages:  # 将数据读入，以展示以往的对话记录
-        st.chat_message(i.type).write(i.content)  # 这里的 i.type 和 i.content 可以自己用jupyter试一下
+    for i in conversation.memory.chat_memory.messages:  # show dialogue before
+        st.chat_message(i.type).write(i.content)
 
-    if user_input := st.chat_input():  # 这里设置为只有用户输入才做出反应
+    if user_input := st.chat_input():
         st.chat_message("user").write(user_input)
         res = conversation.invoke(user_input)
         st.chat_message("ai").write(res["response"])
 
 
-# ReAcT(先实现在非 RAG 下的多轮 ReAct 对话)
+# ReAcT
 elif mode == "ReAct(test)":
     if bool_clear_memory:
         st.session_state["chat_history_ReAct"] = ChatMessageHistory()
         st.session_state["chat_history_ReAct"].add_ai_message("Hello! How can I help you.")
     uploaded_pyfile = st.file_uploader("选择一个Python文件", type="py")
     flag = True
-    tools_info_list = [] # 这是一个str的列表，其中为函数的描述
-    tools_name = [] # 这是函数的名字列表
+    tools_info_list = []
+    tools_name = []
     if uploaded_pyfile is not None:
-        file_content = uploaded_pyfile.read().decode("utf-8") # 读取文件内容
+        file_content = uploaded_pyfile.read().decode("utf-8")
     else:
         flag = False
 
     if flag:
         functions = extract_functions_with_tool_decorator(file_content)
         for func_name, func_code in functions.items():
-            exec(func_code, globals()) # 在全局命名空间中执行函数定义,只有这个执行才能调用函数
-            # 如果要调用就用 globals()[函数名:str].invoke(列表)
-            tools_info_list.append(render_text_description([globals()[func_name]])) # 储存描述
+            exec(func_code, globals())
+            tools_info_list.append(render_text_description([globals()[func_name]]))
             tools_name.append(func_name)
 
-    tools_info = '\n'.join(tools_info_list) # 得到函数描述
+    tools_info = '\n'.join(tools_info_list)
 
     action_format = """
     {{
@@ -347,7 +345,7 @@ elif mode == "ReAct(test)":
     prompt_react = ChatPromptTemplate.from_messages(
         [
             ("system", prompt_sys),
-            MessagesPlaceholder(variable_name="history"), # 同 RAG中多轮对话实现
+            MessagesPlaceholder(variable_name="history"),
             ("human", prompt_human)
         ]
     )
@@ -361,6 +359,8 @@ elif mode == "ReAct(test)":
         st.chat_message('ai').write(ans[1][1])
         st.session_state["chat_history_ReAct"].add_user_message(ans[0][1])
         st.session_state["chat_history_ReAct"].add_ai_message(ans[1][1])
+
+# My first Repository, have fun!
 
 
 
